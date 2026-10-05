@@ -48,17 +48,13 @@ export function MailboxList({
   onPageChange,
   onSelectMailbox,
   onDeleteMailbox,
-  setConfirmingId
+  setConfirmingId,
 }: MailboxListProps) {
   const showDeleteAction = Boolean(onDeleteMailbox && setConfirmingId);
   if (!showWhenEmpty && !isLoading && !error && !search && total <= 0) return null;
 
   return (
     <div className="inbox-list-section inbox-mailbox-list-section">
-      <div className="inbox-section-heading">
-        <p>{text.inbox.myMailboxes}</p>
-        <span>{formatCount(text.inbox.mailboxCount, total)}</span>
-      </div>
       <div className="inbox-search">
         <Search size={15} className="shrink-0 text-[var(--muted)]" />
         <input
@@ -75,39 +71,63 @@ export function MailboxList({
           </IconButton>
         )}
       </div>
-      {error ? (
-        <InboxListError label={readErrorMessage(error)} actionLabel={text.common.refresh} onRetry={onRetry} />
-      ) : isLoading ? (
-        <EmptyState label={text.common.loading} />
-      ) : items.length > 0 ? (
-        <div className="inbox-scroll-list inbox-mailbox-list" role="list">
-          {items.map((mailbox) => (
-            <MailboxRow
-              key={mailbox.id}
-              text={text}
-              mailbox={mailbox}
-              active={mailbox.email === selectedEmail}
-              confirming={showDeleteAction && confirmingId === mailbox.id}
-              onSelect={() => onSelectMailbox(mailbox)}
-              onDelete={showDeleteAction ? (row) => onDeleteMailbox?.(mailbox, row) : undefined}
-              setConfirmingId={setConfirmingId}
-              showDeleteAction={showDeleteAction}
-            />
-          ))}
-        </div>
-      ) : (
-        <EmptyState label={search ? (searchEmptyLabel || text.inbox.mailboxSearchEmpty) : (emptyLabel || text.inbox.start)} />
-      )}
-      <PaginationControls
-        page={page}
-        totalPages={totalPages}
-        onPageChange={onPageChange}
-      />
+      <div className="inbox-list-body">
+        {error ? (
+          <InboxListError
+            label={readErrorMessage(error)}
+            actionLabel={text.common.refresh}
+            onRetry={onRetry}
+          />
+        ) : isLoading ? (
+          <EmptyState label={text.common.loading} />
+        ) : items.length > 0 ? (
+          <div className="inbox-scroll-list inbox-mailbox-list" role="list">
+            {items.map((mailbox) => (
+              <MailboxRow
+                key={mailbox.id}
+                text={text}
+                mailbox={mailbox}
+                active={mailbox.email === selectedEmail}
+                confirming={showDeleteAction && confirmingId === mailbox.id}
+                onSelect={() => onSelectMailbox(mailbox)}
+                onDelete={showDeleteAction ? (row) => onDeleteMailbox?.(mailbox, row) : undefined}
+                setConfirmingId={setConfirmingId}
+                showDeleteAction={showDeleteAction}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            label={
+              search
+                ? searchEmptyLabel || text.inbox.mailboxSearchEmpty
+                : emptyLabel || text.inbox.start
+            }
+          />
+        )}
+      </div>
+      <div className="inbox-list-footer">
+        <span>{formatCount(text.inbox.mailboxCount, total)}</span>
+        <PaginationControls
+          page={page}
+          totalPages={totalPages}
+          onPageChange={onPageChange}
+          compact
+        />
+      </div>
     </div>
   );
 }
 
-function InboxListError({ label, actionLabel, onRetry }: { label: string; actionLabel: string; onRetry: () => void }) {
+function InboxListError({
+  label,
+  actionLabel,
+  onRetry,
+}: {
+  label: string;
+  actionLabel: string;
+  onRetry: () => void;
+}) {
   return (
     <div className="inbox-list-error" role="alert">
       <span>{label}</span>
@@ -141,41 +161,63 @@ export function MailboxRow({
   onSelect,
   onDelete,
   setConfirmingId,
-  showDeleteAction = true
+  showDeleteAction = true,
 }: MailboxRowProps) {
+  const separator = mailbox.email.lastIndexOf('@');
+  const name = separator < 0 ? mailbox.email : mailbox.email.slice(0, separator);
+  const domain = separator < 0 ? '' : mailbox.email.slice(separator + 1);
+
   return (
     <div
       className={[
         'mailbox-row',
         active ? 'mailbox-row-active' : '',
-        showDeleteAction ? '' : 'mailbox-row-select-only'
-      ].filter(Boolean).join(' ')}
+        showDeleteAction ? '' : 'mailbox-row-select-only',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       role="listitem"
     >
       <button
         type="button"
         className="mailbox-row-main"
         onClick={onSelect}
+        aria-label={mailbox.email}
+        aria-current={active ? 'true' : undefined}
+        title={mailbox.email}
       >
         <Inbox size={16} className="shrink-0 text-[var(--muted)]" />
-        <span className="min-w-0 flex-1 truncate font-medium">{mailbox.email}</span>
-        <span className="badge shrink-0">{mailbox.message_count}</span>
+        <span className="mailbox-row-address">
+          <span className="mailbox-row-name">{name}</span>
+          {domain && <span className="mailbox-row-domain">{domain}</span>}
+        </span>
+        {mailbox.message_count > 0 && (
+          <span
+            className="badge shrink-0"
+            aria-label={formatCount(text.inbox.messageCount, mailbox.message_count)}
+          >
+            {mailbox.message_count}
+          </span>
+        )}
       </button>
       {showDeleteAction && onDelete && setConfirmingId && (
         <button
           type="button"
           className={`mailbox-delete-btn ${confirming ? 'text-[var(--bad)]' : 'text-[var(--muted)] hover:text-[var(--bad)]'}`}
+          data-confirming={confirming || undefined}
           aria-label={confirming ? text.inbox.confirmDelete : text.inbox.deleteMailbox}
           title={confirming ? `${text.inbox.confirmDelete} (3s)` : text.inbox.deleteMailbox}
           onClick={(event) => {
             event.stopPropagation();
             if (confirming) {
-              const row = (event.currentTarget as HTMLElement).closest('.mailbox-row') as HTMLElement | null;
+              const row = (event.currentTarget as HTMLElement).closest(
+                '.mailbox-row'
+              ) as HTMLElement | null;
               setConfirmingId(null);
               onDelete(row);
             } else {
               setConfirmingId(mailbox.id);
-              setTimeout(() => setConfirmingId((id) => id === mailbox.id ? null : id), 3000);
+              setTimeout(() => setConfirmingId((id) => (id === mailbox.id ? null : id)), 3000);
             }
           }}
         >

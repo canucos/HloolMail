@@ -656,7 +656,8 @@
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 70;
+  /* 模态操作必须盖过新手引导，避免提示面板拦截表单点击。 */
+  z-index: var(--z-modal, 9030);
   display: grid;
   place-items: center;
   background: rgba(0, 0, 0, 0.34);

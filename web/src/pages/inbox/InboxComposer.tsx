@@ -1,318 +1,241 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { AtSign, Check, ChevronDown, Globe2, Loader2, MailPlus, Network, Sparkles, ShieldCheck } from 'lucide-react';
-import type { PublicDomainItem } from '../../api';
-import type { Language } from '../../store';
-import { domainModeLabel } from '../../lib/display';
-import type { InboxText } from './types';
-import type { MailboxAddressType } from './useMailboxGeneration';
+import { useEffect, useId, useMemo, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { AtSign, Loader2, MailPlus, Network, ShieldAlert, X } from 'lucide-react';
+import { api, type MailboxStats, type PublicDomainItem } from '../../api';
+import { IconButton } from '../../components/shared';
+import { DialogShell } from '../../components/shared/DialogShell';
+import { useVisibleRefetchInterval } from '../../hooks/useVisibleRefetchInterval';
+import { getAvailableDomains } from '../../lib/openapiClient';
+import { useText } from '../../locales';
+import { useAppStore } from '../../store';
+import { useMailboxGeneration, type MailboxAddressType } from './useMailboxGeneration';
+import { domainAvailabilityGroups } from './utils';
 
 type InboxComposerProps = {
-  text: InboxText;
-  language: Language;
-  prefix: string;
-  domainName: string;
-  addressType: MailboxAddressType;
-  subdomain: string;
-  availabilityGroups: {
-    publicDomains: PublicDomainItem[];
-    privateDomains: PublicDomainItem[];
-  };
-  isGenerating: boolean;
-  generateButtonRef: RefObject<HTMLButtonElement | null>;
-  onPrefixChange: (value: string) => void;
-  onDomainChange: (value: string) => void;
-  onAddressTypeChange: (value: MailboxAddressType) => void;
-  onSubdomainChange: (value: string) => void;
-  onGenerate: () => void;
+  open: boolean;
+  onClose: () => void;
+  onCreated: () => void;
 };
 
-export function InboxComposer({
-  text,
-  language,
-  prefix,
-  domainName,
-  addressType,
-  subdomain,
-  availabilityGroups,
-  isGenerating,
-  generateButtonRef,
-  onPrefixChange,
-  onDomainChange,
-  onAddressTypeChange,
-  onSubdomainChange,
-  onGenerate
-}: InboxComposerProps) {
-  return (
-    <div className="inbox-composer grid gap-2 rounded-lg border border-[var(--border)] bg-[var(--soft)] p-3">
-      <div className="inbox-address-type" role="group" aria-label={text.inbox.addressType}>
-        <AddressTypeButton
-          icon="root"
-          label={text.inbox.rootAddress}
-          active={addressType === 'root'}
-          onClick={() => onAddressTypeChange('root')}
-        />
-        <AddressTypeButton
-          icon="subdomain"
-          label={text.inbox.subdomainAddress}
-          active={addressType === 'subdomain'}
-          onClick={() => onAddressTypeChange('subdomain')}
-        />
-      </div>
-      <input
-        className="input"
-        placeholder={text.inbox.customPrefix}
-        aria-label={text.inbox.customPrefix}
-        value={prefix}
-        onChange={(event) => onPrefixChange(event.target.value)}
-      />
-      <DomainSelect
-        text={text}
-        language={language}
-        value={domainName}
-        addressType={addressType}
-        availabilityGroups={availabilityGroups}
-        onChange={onDomainChange}
-      />
-      {addressType === 'subdomain' && (
-        <input
-          className="input"
-          placeholder={text.inbox.customSubdomain}
-          aria-label={text.inbox.customSubdomain}
-          value={subdomain}
-          onChange={(event) => onSubdomainChange(event.target.value)}
-        />
-      )}
-      <button ref={generateButtonRef} className="btn-primary" data-onboarding-target="create-mailbox" onClick={onGenerate} disabled={isGenerating}>
-        {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <MailPlus size={16} />}
-        {text.inbox.generate}
-      </button>
-    </div>
-  );
-}
-
-function AddressTypeButton({
-  icon,
-  label,
-  active,
-  onClick
-}: {
-  icon: MailboxAddressType;
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const Icon = icon === 'subdomain' ? Network : AtSign;
-  return (
-    <button
-      type="button"
-      className={`inbox-address-type-choice ${active ? 'inbox-address-type-choice-active' : ''}`}
-      aria-pressed={active}
-      onClick={onClick}
-    >
-      <Icon size={15} aria-hidden="true" />
-      <span>{label}</span>
-    </button>
-  );
-}
-
-type DomainSelectProps = {
-  text: InboxText;
-  language: Language;
-  value: string;
-  addressType: MailboxAddressType;
-  availabilityGroups: InboxComposerProps['availabilityGroups'];
-  onChange: (value: string) => void;
-};
-
-type DomainSelectOption = {
-  value: string;
-  label: string;
-  mode: PublicDomainItem['mode'] | 'available';
-  pillLabel?: string;
-  random?: boolean;
-};
-
-function DomainSelect({ text, language, value, addressType, availabilityGroups, onChange }: DomainSelectProps) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-
-  const randomOption = useMemo<DomainSelectOption>(() => ({
-    value: '',
-    label: addressType === 'subdomain' ? text.inbox.randomWildcardDomain : text.inbox.randomDomain,
-    mode: addressType === 'subdomain' ? 'available' : 'public',
-    pillLabel: addressType === 'subdomain' ? text.inbox.availableParentDomain : text.domains.modePublic,
-    random: true
-  }), [addressType, text.domains.modePublic, text.inbox.availableParentDomain, text.inbox.randomDomain, text.inbox.randomWildcardDomain]);
-
-  const privateOptions = useMemo(
-    () => availabilityGroups.privateDomains.filter((domain) => domainSupportsAddressType(domain, addressType)).map(domainToOption),
+export function InboxComposer({ open, onClose, onCreated }: InboxComposerProps) {
+  const text = useText();
+  const apiKey = useAppStore((state) => state.apiKey);
+  const id = useId();
+  const prefixRef = useRef<HTMLInputElement>(null);
+  const statsInterval = useVisibleRefetchInterval(30000);
+  const domains = useQuery({
+    queryKey: ['domains-available', apiKey],
+    queryFn: () => getAvailableDomains({ apiKey }),
+    enabled: open,
+    staleTime: 10_000,
+  });
+  const mailboxStats = useQuery({
+    queryKey: ['mailbox-stats', apiKey],
+    queryFn: () => api<MailboxStats>('/api/mailboxes/stats', { apiKey }),
+    enabled: open,
+    staleTime: 15_000,
+    refetchInterval: statsInterval,
+  });
+  const {
+    prefix,
+    domainName,
+    addressType,
+    subdomain,
+    generate,
+    generateButtonRef,
+    setPrefix,
+    setDomainName,
+    setAddressType,
+    setSubdomain,
+  } = useMailboxGeneration({ apiKey, onGenerated: onCreated });
+  const isGenerating = generate.isPending;
+  const stats = mailboxStats.data;
+  const availabilityGroups = useMemo(() => domainAvailabilityGroups(domains.data), [domains.data]);
+  const privateDomains = useMemo(
+    () =>
+      availabilityGroups.privateDomains.filter((domain) =>
+        domainSupportsAddressType(domain, addressType)
+      ),
     [addressType, availabilityGroups.privateDomains]
   );
-  const publicOptions = useMemo(
-    () => availabilityGroups.publicDomains.filter((domain) => domainSupportsAddressType(domain, addressType)).map(domainToOption),
+  const publicDomains = useMemo(
+    () =>
+      availabilityGroups.publicDomains.filter((domain) =>
+        domainSupportsAddressType(domain, addressType)
+      ),
     [addressType, availabilityGroups.publicDomains]
   );
-  const allOptions = useMemo(
-    () => [randomOption, ...privateOptions, ...publicOptions],
-    [randomOption, privateOptions, publicOptions]
-  );
-  const selected = allOptions.find((option) => option.value === value) || randomOption;
 
+  // 切换邮箱类型后，清除不支持该类型的域名，避免提交隐藏的旧选项。
   useEffect(() => {
-    if (value && !allOptions.some((option) => option.value === value)) onChange('');
-  }, [allOptions, onChange, value]);
+    if (
+      domains.data &&
+      domainName &&
+      ![...privateDomains, ...publicDomains].some((domain) => domain.domain === domainName)
+    ) {
+      setDomainName('');
+    }
+  }, [domains.data, domainName, setDomainName, privateDomains, publicDomains]);
 
-  useEffect(() => {
-    if (!open) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [open]);
-
-  const choose = (nextValue: string) => {
-    onChange(nextValue);
-    setOpen(false);
-    triggerRef.current?.focus();
-  };
+  const privateSelected = privateDomains.some((domain) => domain.domain === domainName);
+  const creationHint = privateSelected
+    ? ''
+    : stats?.require_public_domain && !stats.has_public_domain
+      ? text.inbox.requirePublicDomainHint
+      : stats &&
+          stats.public_mailbox_daily_limit > 0 &&
+          stats.public_mailbox_today >= stats.public_mailbox_daily_limit
+        ? text.inbox.noQuotaHint
+        : '';
 
   return (
-    <div className="inbox-domain-select" ref={rootRef}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className={`inbox-domain-trigger ${open ? 'inbox-domain-trigger-open' : ''}`}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-      >
-        <DomainIcon option={selected} />
-        <span className="inbox-domain-trigger-copy">
-          <span className="inbox-domain-name">{selected.label}</span>
-        </span>
-        <ChevronDown size={15} className="inbox-domain-chevron" aria-hidden="true" />
-      </button>
-
-      {open && (
-        <div className="inbox-domain-menu" role="listbox">
-          <DomainOptionButton
-            option={randomOption}
-            active={selected.value === randomOption.value}
-            language={language}
-            onChoose={choose}
-          />
-          <DomainOptionGroup
-            label={text.domains.modePrivate}
-            options={privateOptions}
-            selectedValue={selected.value}
-            language={language}
-            onChoose={choose}
-          />
-          <DomainOptionGroup
-            label={text.domains.modePublic}
-            options={publicOptions}
-            selectedValue={selected.value}
-            language={language}
-            onChoose={choose}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DomainOptionGroup({
-  label,
-  options,
-  selectedValue,
-  language,
-  onChoose
-}: {
-  label: string;
-  options: DomainSelectOption[];
-  selectedValue: string;
-  language: Language;
-  onChoose: (value: string) => void;
-}) {
-  if (!options.length) return null;
-  return (
-    <div className="inbox-domain-option-group">
-      <div className="inbox-domain-option-label">{label}</div>
-      {options.map((option) => (
-        <DomainOptionButton
-          key={option.value}
-          option={option}
-          active={selectedValue === option.value}
-          language={language}
-          onChoose={onChoose}
-        />
-      ))}
-    </div>
-  );
-}
-
-function DomainOptionButton({
-  option,
-  active,
-  language,
-  onChoose
-}: {
-  option: DomainSelectOption;
-  active: boolean;
-  language: Language;
-  onChoose: (value: string) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="option"
-      aria-selected={active}
-      className={`inbox-domain-option ${active ? 'inbox-domain-option-active' : ''}`}
-      onClick={() => onChoose(option.value)}
+    <DialogShell
+      open={open}
+      as="form"
+      className="modal-panel inbox-create-dialog"
+      titleId={`${id}-title`}
+      initialFocusRef={prefixRef}
+      onClose={onClose}
+      closeOnBackdrop={!isGenerating}
+      closeOnEscape={!isGenerating}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (isGenerating) return;
+        // 提交后控件全部禁用，先将焦点交给弹窗，避免落到页面背景。
+        event.currentTarget.focus();
+        generate.mutate();
+      }}
     >
-      <DomainIcon option={option} />
-      <span className="inbox-domain-option-copy">
-        <span className="inbox-domain-name">{option.label}</span>
-        <span className={`inbox-domain-pill inbox-domain-pill-${option.mode}`}>
-          {option.pillLabel || domainModeLabel(option.mode as PublicDomainItem['mode'], language)}
-        </span>
-      </span>
-      <Check size={15} className="inbox-domain-check" aria-hidden="true" />
-    </button>
+      <div className="modal-header">
+        <h2 id={`${id}-title`}>{text.inbox.createMailbox}</h2>
+        <IconButton title={text.common.close} onClick={onClose} disabled={isGenerating}>
+          <X size={18} aria-hidden="true" />
+        </IconButton>
+      </div>
+
+      <fieldset className="inbox-composer" disabled={isGenerating}>
+        <div className="inbox-address-type" role="group" aria-label={text.inbox.addressType}>
+          <button
+            type="button"
+            className="inbox-address-type-choice"
+            aria-pressed={addressType === 'root'}
+            onClick={() => setAddressType('root')}
+          >
+            <AtSign size={16} aria-hidden="true" />
+            <span>{text.inbox.rootAddress}</span>
+          </button>
+          <button
+            type="button"
+            className="inbox-address-type-choice"
+            aria-pressed={addressType === 'subdomain'}
+            onClick={() => setAddressType('subdomain')}
+          >
+            <Network size={16} aria-hidden="true" />
+            <span>{text.inbox.subdomainAddress}</span>
+          </button>
+        </div>
+
+        <label className="inbox-composer-field" htmlFor={`${id}-prefix`}>
+          <span>{text.inbox.customPrefix}</span>
+          <input
+            ref={prefixRef}
+            id={`${id}-prefix`}
+            className="input"
+            placeholder={text.inbox.autoGenerate}
+            value={prefix}
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            onChange={(event) => setPrefix(event.target.value)}
+          />
+        </label>
+
+        <label className="inbox-composer-field" htmlFor={`${id}-domain`}>
+          <span>{text.domains.domain}</span>
+          <select
+            id={`${id}-domain`}
+            className="input"
+            value={domainName}
+            onChange={(event) => setDomainName(event.target.value)}
+          >
+            <option value="">
+              {addressType === 'subdomain'
+                ? text.inbox.randomWildcardDomain
+                : text.inbox.randomDomain}
+            </option>
+            {privateDomains.length > 0 && (
+              <optgroup label={text.domains.modePrivate}>
+                {privateDomains.map((domain) => (
+                  <option key={domain.domain} value={domain.domain}>
+                    {domain.domain}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {publicDomains.length > 0 && (
+              <optgroup label={text.domains.modePublic}>
+                {publicDomains.map((domain) => (
+                  <option key={domain.domain} value={domain.domain}>
+                    {domain.domain}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </label>
+
+        {addressType === 'subdomain' && (
+          <label className="inbox-composer-field" htmlFor={`${id}-subdomain`}>
+            <span>{text.inbox.customSubdomain}</span>
+            <input
+              id={`${id}-subdomain`}
+              className="input"
+              placeholder={text.inbox.autoGenerate}
+              value={subdomain}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              onChange={(event) => setSubdomain(event.target.value)}
+            />
+          </label>
+        )}
+
+        {creationHint && (
+          <p className="inbox-creation-hint" role="status">
+            <ShieldAlert size={16} aria-hidden="true" />
+            <span>{creationHint}</span>
+          </p>
+        )}
+      </fieldset>
+
+      <div className="modal-footer">
+        <button type="button" className="btn-ghost" onClick={onClose} disabled={isGenerating}>
+          {text.common.cancel}
+        </button>
+        <button
+          ref={generateButtonRef}
+          type="submit"
+          className="btn-primary"
+          disabled={isGenerating}
+          aria-busy={isGenerating}
+        >
+          {isGenerating ? (
+            <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <MailPlus size={16} aria-hidden="true" />
+          )}
+          {text.inbox.generate}
+        </button>
+      </div>
+    </DialogShell>
   );
-}
-
-function DomainIcon({ option }: { option: DomainSelectOption }) {
-  const className = `inbox-domain-icon inbox-domain-icon-${option.random ? 'random' : option.mode}`;
-  if (option.random) return <Sparkles size={15} className={className} aria-hidden="true" />;
-  if (option.mode === 'private') return <ShieldCheck size={15} className={className} aria-hidden="true" />;
-  return <Globe2 size={15} className={className} aria-hidden="true" />;
-}
-
-function domainToOption(domain: PublicDomainItem): DomainSelectOption {
-  return {
-    value: domain.domain,
-    label: domain.domain,
-    mode: domain.mode
-  };
 }
 
 function domainSupportsAddressType(domain: PublicDomainItem, addressType: MailboxAddressType) {
-  if (addressType === 'subdomain') return domain.wildcard_ready === true || domain.capabilities?.includes('subdomain_mailbox') === true;
+  if (addressType === 'subdomain')
+    return (
+      domain.wildcard_ready === true || domain.capabilities?.includes('subdomain_mailbox') === true
+    );
   return domain.root_ready !== false && domain.capabilities?.includes('subdomain_mailbox') !== true
     ? true
     : domain.root_ready === true || domain.capabilities?.includes('root_mailbox') === true;

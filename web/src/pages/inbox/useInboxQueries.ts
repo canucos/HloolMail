@@ -1,8 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import type { MailboxInfo, MailboxStats, MessageDetail, MessageSummary, PaginatedResponse } from '../../api';
+import type { MailboxInfo, MessageDetail, MessageSummary, PaginatedResponse } from '../../api';
 import { api } from '../../api';
 import { useVisibleRefetchInterval } from '../../hooks/useVisibleRefetchInterval';
-import { getAvailableDomains } from '../../lib/openapiClient';
 import { EMAIL_PAGE_SIZE, MAILBOX_PAGE_SIZE } from './utils';
 
 type InboxQueriesOptions = {
@@ -20,16 +19,10 @@ export function useInboxQueries({
   mailboxQuery,
   mailboxPage,
   emailPage,
-  selectedID
+  selectedID,
 }: InboxQueriesOptions) {
   const mailboxesInterval = useVisibleRefetchInterval(30000);
   const emailsInterval = useVisibleRefetchInterval(30000);
-
-  const domains = useQuery({
-    queryKey: ['domains-available', apiKey],
-    queryFn: () => getAvailableDomains({ apiKey }),
-    staleTime: 10_000
-  });
 
   const mailboxes = useQuery({
     queryKey: ['mailboxes', apiKey, mailboxQuery, mailboxPage],
@@ -37,20 +30,13 @@ export function useInboxQueries({
       const params = new URLSearchParams({
         scope: 'own',
         page: String(mailboxPage),
-        per_page: String(MAILBOX_PAGE_SIZE)
+        per_page: String(MAILBOX_PAGE_SIZE),
       });
       if (mailboxQuery) params.set('q', mailboxQuery);
       return api<PaginatedResponse<MailboxInfo>>(`/api/mailboxes?${params.toString()}`, { apiKey });
     },
     staleTime: 10_000,
-    refetchInterval: mailboxesInterval
-  });
-
-  const mailboxStats = useQuery({
-    queryKey: ['mailbox-stats', apiKey],
-    queryFn: () => api<MailboxStats>('/api/mailboxes/stats', { apiKey }),
-    staleTime: 15_000,
-    refetchInterval: mailboxesInterval
+    refetchInterval: mailboxesInterval,
   });
 
   const emails = useQuery({
@@ -59,33 +45,31 @@ export function useInboxQueries({
       const params = new URLSearchParams({
         email,
         page: String(emailPage),
-        per_page: String(EMAIL_PAGE_SIZE)
+        per_page: String(EMAIL_PAGE_SIZE),
       });
       return api<PaginatedResponse<MessageSummary>>(`/api/emails?${params.toString()}`, { apiKey });
     },
     enabled: Boolean(email),
     staleTime: 10_000,
-    refetchInterval: emailsInterval
+    refetchInterval: emailsInterval,
   });
 
   const detail = useQuery({
     queryKey: ['email-detail', selectedID, apiKey],
     queryFn: () => api<MessageDetail>(`/api/email/${selectedID}`, { apiKey }),
-    enabled: Boolean(selectedID)
+    enabled: Boolean(selectedID),
   });
 
   const mailboxItems = mailboxes.data?.items || [];
   const emailItems = emails.data?.items || [];
 
   return {
-    domains,
     mailboxes,
-    mailboxStats,
     emails,
     detail,
     mailboxItems,
     emailItems,
     mailboxTotal: mailboxes.data?.total ?? mailboxItems.length,
-    emailTotal: emails.data?.total ?? emailItems.length
+    emailTotal: emails.data?.total ?? emailItems.length,
   };
 }

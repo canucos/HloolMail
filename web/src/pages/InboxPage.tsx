@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useReducedMotion } from 'framer-motion';
-import { Check, Copy, Share2 } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Inbox, MailPlus, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { MailboxInfo, ShareLinkDTO } from '../api';
 import { api, postJSON } from '../api';
@@ -9,19 +9,16 @@ import { useText } from '../locales';
 import { useAppStore } from '../store';
 import { useCopyState } from '../hooks/useCopyState';
 import { copy } from '../lib/clipboard';
-import { notifySuccess, runDeleteContainerEffect, runDeleteEffect } from '../lib/feedback';
+import { notifySuccess, runDeleteEffect } from '../lib/feedback';
 import { IconButton } from '../components/shared';
 import { InboxActions } from './inbox/InboxActions';
 import { InboxComposer } from './inbox/InboxComposer';
 import { MailboxList } from './inbox/MailboxList';
-import { MailboxStatsBar } from './inbox/MailboxStatsBar';
 import { MessageList } from './inbox/MessageList';
 import { MessagePreviewPane } from './inbox/MessagePreviewPane';
 import { useActiveMailboxStream } from './inbox/useActiveMailboxStream';
 import { useInboxQueries } from './inbox/useInboxQueries';
-import { useMailboxGeneration } from './inbox/useMailboxGeneration';
 import { useMailboxSelection } from './inbox/useMailboxSelection';
-import { domainAvailabilityGroups } from './inbox/utils';
 import { OneTimeLinkCard } from './ShareLinksPage';
 import '../styles/inbox.css';
 
@@ -30,14 +27,15 @@ export function InboxPage() {
   const email = useAppStore((s) => s.email);
   const setEmail = useAppStore((s) => s.setEmail);
   const apiKey = useAppStore((s) => s.apiKey);
-  const language = useAppStore((s) => s.language);
   const shouldReduceMotion = useReducedMotion();
   const text = useText();
-  const mailListRef = useRef<HTMLDivElement>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
   const [emailCopied, markEmailCopied] = useCopyState();
   const [mailboxShareLink, setMailboxShareLink] = useState<ShareLinkDTO | null>(null);
   const [mobileStep, setMobileStep] = useState<'mailboxes' | 'messages' | 'detail'>('mailboxes');
+  const messagesTitleRef = useRef<HTMLHeadingElement>(null);
+  const focusMessagesAfterCreate = useRef(false);
 
   const selection = useMailboxSelection({ email });
   const {
@@ -54,31 +52,24 @@ export function InboxPage() {
     setSelectedID,
     setConfirmingId,
     resetAfterGenerate,
-    trackMessageItems
+    trackMessageItems,
   } = selection;
-  const generation = useMailboxGeneration({
-    apiKey,
-    onGenerated: resetAfterGenerate
-  });
   const inbox = useInboxQueries({
     apiKey,
     email,
     mailboxQuery,
     mailboxPage,
     emailPage,
-    selectedID
+    selectedID,
   });
-  const availabilityGroups = useMemo(
-    () => domainAvailabilityGroups(inbox.domains.data),
-    [inbox.domains.data]
-  );
   const activeMailbox = useMemo(
     () => inbox.mailboxItems.find((mailbox) => mailbox.email === email),
     [email, inbox.mailboxItems]
   );
 
   const clear = useMutation({
-    mutationFn: () => api(`/api/emails/clear?email=${encodeURIComponent(email)}`, { method: 'DELETE', apiKey }),
+    mutationFn: () =>
+      api(`/api/emails/clear?email=${encodeURIComponent(email)}`, { method: 'DELETE', apiKey }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['emails'] });
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
@@ -87,11 +78,12 @@ export function InboxPage() {
       setEmailPage(1);
       notifySuccess(text.toast.inboxCleared, { burst: false });
     },
-    onError: (error) => toast.error(error.message)
+    onError: (error) => toast.error(error.message),
   });
 
   const deleteMailbox = useMutation({
-    mutationFn: (mailbox: MailboxInfo) => api(`/api/mailboxes/${mailbox.id}`, { method: 'DELETE', apiKey }),
+    mutationFn: (mailbox: MailboxInfo) =>
+      api(`/api/mailboxes/${mailbox.id}`, { method: 'DELETE', apiKey }),
     onSuccess: (_data, mailbox) => {
       queryClient.invalidateQueries({ queryKey: ['mailboxes'] });
       queryClient.invalidateQueries({ queryKey: ['mailbox-stats'] });
@@ -104,25 +96,33 @@ export function InboxPage() {
       }
       notifySuccess(text.inbox.mailboxDeleted, { burst: false });
     },
-    onError: (error) => toast.error(error.message)
+    onError: (error) => toast.error(error.message),
   });
   const shareMailbox = useMutation({
-    mutationFn: (mailbox: MailboxInfo) => postJSON<ShareLinkDTO>('/api/share-links', {
-      resource_type: 'mailbox',
-      mailbox_id: mailbox.id
-    }),
+    mutationFn: (mailbox: MailboxInfo) =>
+      postJSON<ShareLinkDTO>('/api/share-links', {
+        resource_type: 'mailbox',
+        mailbox_id: mailbox.id,
+      }),
     onSuccess: (link) => {
       setMailboxShareLink(link);
       queryClient.invalidateQueries({ queryKey: ['share-links'] });
       toast.success(text.shareLinks.mailboxCreatedFromInbox);
     },
-    onError: (error) => toast.error(error.message)
+    onError: (error) => toast.error(error.message),
   });
 
   useActiveMailboxStream({
     email,
-    onMessage: () => setEmailPage(1)
+    onMessage: () => setEmailPage(1),
   });
+
+  useEffect(() => {
+    if (composerOpen || !focusMessagesAfterCreate.current) return;
+    focusMessagesAfterCreate.current = false;
+    // 移动端成功后创建按钮会隐藏，等待视图切换完成再聚焦新邮箱标题。
+    messagesTitleRef.current?.focus();
+  }, [composerOpen]);
 
   useEffect(() => {
     if (inbox.mailboxes.data && inbox.mailboxes.data.page !== mailboxPage) {
@@ -144,13 +144,11 @@ export function InboxPage() {
     setMailboxShareLink(null);
   }, [email]);
 
-  const handleClear = async () => {
+  const handleClear = () => {
     if (confirmClear) {
-      if (mailListRef.current && inbox.emailItems.length > 0) {
-        await runDeleteContainerEffect(mailListRef.current, { duration: 700, blockSize: 6 });
-      }
-      clear.mutate();
+      // 列表容器会继续承载空状态，不对它施加删除动画的隐藏样式。
       setConfirmClear(false);
+      clear.mutate();
     } else {
       setConfirmClear(true);
       setTimeout(() => setConfirmClear(false), 3000);
@@ -161,7 +159,7 @@ export function InboxPage() {
     deleteMailbox.mutate(mailbox, {
       onSuccess: async () => {
         await runDeleteEffect(row);
-      }
+      },
     });
   };
 
@@ -172,39 +170,42 @@ export function InboxPage() {
   };
 
   const selectMessage = (id: string) => {
-    const nextID = selectedID === id ? '' : id;
-    setSelectedID(nextID);
-    if (nextID) setMobileStep('detail');
+    setSelectedID(id);
+    setMobileStep(id ? 'detail' : 'messages');
   };
 
+  const handleCreated = () => {
+    resetAfterGenerate();
+    focusMessagesAfterCreate.current = true;
+    setComposerOpen(false);
+    setMobileStep('messages');
+  };
+
+  // 清空或删除当前邮箱后，窄屏也能回到仍有内容的列表。
+  const visibleStep = !email
+    ? 'mailboxes'
+    : mobileStep === 'detail' && !selectedID
+      ? 'messages'
+      : mobileStep;
+
   return (
-    <div className="inbox-layout">
-      <section className={`panel inbox-column inbox-mailbox-column ${mobileStep !== 'mailboxes' ? 'inbox-drilldown-hidden' : ''}`}>
-        <div className="panel-header inbox-column-header">
-          <div>
-            <h2>{text.page.inbox}</h2>
-            <p>{email || text.inbox.noEmail}</p>
-          </div>
+    <div className={`inbox-layout ${selectedID ? 'inbox-layout-has-detail' : ''}`}>
+      <section
+        className={`inbox-column inbox-mailbox-column ${visibleStep !== 'mailboxes' ? 'inbox-drilldown-hidden' : ''}`}
+        aria-labelledby="inbox-title"
+      >
+        <div className="inbox-column-header inbox-mailbox-header">
+          <h2 id="inbox-title">{text.page.inbox}</h2>
+          <button
+            type="button"
+            className="btn-primary inbox-create-button"
+            data-onboarding-target="create-mailbox"
+            onClick={() => setComposerOpen(true)}
+          >
+            <MailPlus size={16} aria-hidden="true" />
+            {text.inbox.createMailbox}
+          </button>
         </div>
-
-        <InboxComposer
-          text={text}
-          language={language}
-          prefix={generation.prefix}
-          domainName={generation.domainName}
-          addressType={generation.addressType}
-          subdomain={generation.subdomain}
-          availabilityGroups={availabilityGroups}
-          isGenerating={generation.generate.isPending}
-          generateButtonRef={generation.generateButtonRef}
-          onPrefixChange={generation.setPrefix}
-          onDomainChange={generation.setDomainName}
-          onAddressTypeChange={generation.setAddressType}
-          onSubdomainChange={generation.setSubdomain}
-          onGenerate={() => generation.generate.mutate()}
-        />
-
-        <MailboxStatsBar text={text} stats={inbox.mailboxStats.data} />
 
         <MailboxList
           text={text}
@@ -216,6 +217,7 @@ export function InboxPage() {
           totalPages={inbox.mailboxes.data?.total_pages || 1}
           isLoading={inbox.mailboxes.isLoading}
           error={inbox.mailboxes.error}
+          showWhenEmpty
           onRetry={() => inbox.mailboxes.refetch()}
           confirmingId={confirmingId}
           onSearchChange={setMailboxSearch}
@@ -226,79 +228,112 @@ export function InboxPage() {
         />
       </section>
 
-      <section className={`panel inbox-column inbox-message-column ${mobileStep !== 'messages' ? 'inbox-drilldown-hidden' : ''}`}>
+      <section
+        className={`inbox-column inbox-message-column ${visibleStep !== 'messages' ? 'inbox-drilldown-hidden' : ''}`}
+        aria-labelledby="inbox-messages-title"
+      >
         <div className="inbox-mobile-stepbar">
-          <button className="btn-ghost" type="button" onClick={() => setMobileStep('mailboxes')}>{text.inbox.backToMailboxes}</button>
-          <span>{text.inbox.messages}</span>
+          <button className="btn-ghost" type="button" onClick={() => setMobileStep('mailboxes')}>
+            <ArrowLeft size={16} aria-hidden="true" />
+            {text.inbox.backToMailboxes}
+          </button>
         </div>
 
-        <div className="panel-header inbox-column-header">
-          <div className="min-w-0">
-            <h2>{text.inbox.messages}</h2>
-            <p className="truncate">{email || text.inbox.noEmail}</p>
-          </div>
-          <div className="inbox-message-actions">
-            {email && (
-              <IconButton title={emailCopied ? text.common.copied : text.inbox.copyEmail} onClick={() => { copy(email); markEmailCopied(); }}>
+        <div className="inbox-column-header inbox-message-header">
+          <h2
+            id="inbox-messages-title"
+            ref={messagesTitleRef}
+            tabIndex={-1}
+            title={email || undefined}
+          >
+            {email || text.inbox.messages}
+          </h2>
+          {email && (
+            <div className="inbox-message-actions">
+              <IconButton
+                title={emailCopied ? text.common.copied : text.inbox.copyEmail}
+                onClick={() => {
+                  copy(email);
+                  markEmailCopied();
+                }}
+              >
                 {emailCopied ? <Check size={16} /> : <Copy size={16} />}
               </IconButton>
-            )}
-            {activeMailbox && (
-              <IconButton title={text.shareLinks.shareMailbox} onClick={() => shareMailbox.mutate(activeMailbox)} disabled={shareMailbox.isPending}>
-                <Share2 size={16} />
-              </IconButton>
-            )}
-            <InboxActions
-              text={text}
-              confirmClear={confirmClear}
-              clearDisabled={!email || inbox.emailTotal === 0}
-              isRefetching={inbox.emails.isRefetching}
-              onRefresh={() => inbox.emails.refetch()}
-              onClear={handleClear}
-            />
-          </div>
+              {activeMailbox && (
+                <IconButton
+                  title={text.shareLinks.shareMailbox}
+                  onClick={() => shareMailbox.mutate(activeMailbox)}
+                  disabled={shareMailbox.isPending}
+                >
+                  <Share2 size={16} />
+                </IconButton>
+              )}
+              <InboxActions
+                text={text}
+                confirmClear={confirmClear}
+                clearDisabled={inbox.emailTotal === 0 || clear.isPending}
+                isRefetching={inbox.emails.isRefetching}
+                onRefresh={() => inbox.emails.refetch()}
+                onClear={handleClear}
+              />
+            </div>
+          )}
         </div>
 
-        {email && (
-          <div className="inbox-active-mailbox">
-            <code>{email}</code>
+        {mailboxShareLink && (
+          <OneTimeLinkCard link={mailboxShareLink} onClose={() => setMailboxShareLink(null)} />
+        )}
+
+        {email ? (
+          <MessageList
+            text={text}
+            email={email}
+            items={inbox.emailItems}
+            total={inbox.emailTotal}
+            page={inbox.emails.data?.page || 1}
+            totalPages={inbox.emails.data?.total_pages || 1}
+            selectedID={selectedID}
+            pulseIds={pulseIds}
+            isLoading={inbox.emails.isLoading}
+            isFetching={inbox.emails.isFetching}
+            error={inbox.emails.error}
+            onRetry={() => inbox.emails.refetch()}
+            shouldReduceMotion={Boolean(shouldReduceMotion)}
+            onSelectMessage={selectMessage}
+            onPageChange={(page) => {
+              setSelectedID('');
+              setEmailPage(page);
+              setMobileStep('messages');
+            }}
+          />
+        ) : (
+          <div className="inbox-welcome" role="status">
+            <Inbox size={36} strokeWidth={1.4} aria-hidden="true" />
+            <p>{text.inbox.selectMailbox}</p>
           </div>
         )}
-        {mailboxShareLink && <OneTimeLinkCard link={mailboxShareLink} onClose={() => setMailboxShareLink(null)} />}
-
-        <MessageList
-          ref={mailListRef}
-          text={text}
-          email={email}
-          items={inbox.emailItems}
-          total={inbox.emailTotal}
-          page={inbox.emails.data?.page || 1}
-          totalPages={inbox.emails.data?.total_pages || 1}
-          selectedID={selectedID}
-          pulseIds={pulseIds}
-          isLoading={inbox.emails.isLoading}
-          isFetching={inbox.emails.isFetching}
-          error={inbox.emails.error}
-          onRetry={() => inbox.emails.refetch()}
-          shouldReduceMotion={Boolean(shouldReduceMotion)}
-          onSelectMessage={selectMessage}
-          onPageChange={(page) => {
-            setSelectedID('');
-            setEmailPage(page);
-            setMobileStep('messages');
-          }}
-        />
       </section>
 
-      <div className={`inbox-detail-pane ${mobileStep !== 'detail' ? 'inbox-drilldown-hidden' : ''}`}>
-        <MessagePreviewPane
-          message={selectedID ? inbox.detail.data : undefined}
-          loading={Boolean(selectedID) && inbox.detail.isLoading}
-          error={selectedID ? inbox.detail.error : null}
-          onBack={() => setMobileStep('messages')}
-          onRetry={() => inbox.detail.refetch()}
-        />
-      </div>
+      {selectedID && (
+        <div
+          className={`inbox-detail-pane ${visibleStep !== 'detail' ? 'inbox-drilldown-hidden' : ''}`}
+        >
+          <MessagePreviewPane
+            message={inbox.detail.data}
+            loading={inbox.detail.isLoading}
+            error={inbox.detail.error}
+            onBack={() => selectMessage('')}
+            onRetry={() => inbox.detail.refetch()}
+          />
+        </div>
+      )}
+
+      {/* 受控显示保留创建组件的表单状态，取消关闭后可继续填写。 */}
+      <InboxComposer
+        open={composerOpen}
+        onClose={() => setComposerOpen(false)}
+        onCreated={handleCreated}
+      />
     </div>
   );
 }

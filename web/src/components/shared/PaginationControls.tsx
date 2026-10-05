@@ -7,6 +7,7 @@ export interface PaginationControlsProps {
   totalPages: number;
   onPageChange: (page: number) => void;
   className?: string;
+  compact?: boolean;
   rowsPerPage?: number;
   rowsPerPageOptions?: number[];
   onRowsPerPageChange?: (rowsPerPage: number) => void;
@@ -20,10 +21,11 @@ export function PaginationControls({
   totalPages,
   onPageChange,
   className,
+  compact = false,
   rowsPerPage,
   rowsPerPageOptions,
   onRowsPerPageChange,
-  rowsPerPageLabel
+  rowsPerPageLabel,
 }: PaginationControlsProps) {
   const text = useText();
   const resolvedRowsPerPageLabel = rowsPerPageLabel ?? text.common.rowsPerPage;
@@ -31,12 +33,15 @@ export function PaginationControls({
   const safePage = Math.min(Math.max(1, Math.floor(page || 1)), safeTotal);
   const pageSizeOptions = normalizedRowsPerPageOptions(rowsPerPageOptions, rowsPerPage);
   const safeRowsPerPage = normalizePositiveInteger(rowsPerPage);
-  const showRowsPerPage = Boolean(safeRowsPerPage && onRowsPerPageChange && pageSizeOptions.length > 0);
+  const showRowsPerPage = Boolean(
+    safeRowsPerPage && onRowsPerPageChange && pageSizeOptions.length > 0
+  );
   const pageItems = paginationItems(safePage, safeTotal);
   const compactPageItems = compactPaginationItems(safePage, safeTotal);
-  const pageLabel = (targetPage: number) => text.dashboard.pageOf
-    .replace('{current}', String(targetPage))
-    .replace('{total}', String(safeTotal));
+  const pageLabel = (targetPage: number) =>
+    text.dashboard.pageOf
+      .replace('{current}', String(targetPage))
+      .replace('{total}', String(safeTotal));
 
   if (safeTotal <= 1 && !showRowsPerPage) return null;
 
@@ -51,70 +56,120 @@ export function PaginationControls({
     }
   };
 
-  const renderPageItems = (items: PageItem[], keyPrefix: string) => items.map((item) => item === 'start-gap' || item === 'end-gap' ? (
-    <span className="pagination-gap" key={`${keyPrefix}-${item}`}>...</span>
-  ) : (
-    <button
-      className="pagination-page"
-      key={`${keyPrefix}-${item}`}
-      type="button"
-      aria-current={item === safePage ? 'page' : undefined}
-      aria-label={pageLabel(item)}
-      onClick={() => goToPage(item)}
-    >
-      {item}
-    </button>
-  ));
+  const renderPageItems = (items: PageItem[], keyPrefix: string) =>
+    items.map((item) =>
+      item === 'start-gap' || item === 'end-gap' ? (
+        <span className="pagination-gap" key={`${keyPrefix}-${item}`}>
+          ...
+        </span>
+      ) : (
+        <button
+          className="pagination-page"
+          key={`${keyPrefix}-${item}`}
+          type="button"
+          aria-current={item === safePage ? 'page' : undefined}
+          aria-label={pageLabel(item)}
+          onClick={() => goToPage(item)}
+        >
+          {item}
+        </button>
+      )
+    );
 
   return (
-    <nav className={['pagination', className || ''].filter(Boolean).join(' ')} aria-label={text.common.pagination}>
+    <nav
+      className={['pagination', compact ? 'pagination-compact' : '', className || '']
+        .filter(Boolean)
+        .join(' ')}
+      aria-label={text.common.pagination}
+    >
       {showRowsPerPage ? (
         <div className="pagination-meta">
           <label className="pagination-page-size">
             <span>{resolvedRowsPerPageLabel}</span>
             <select
               value={safeRowsPerPage}
-              aria-label={typeof resolvedRowsPerPageLabel === 'string' ? resolvedRowsPerPageLabel : text.common.rowsPerPage}
+              aria-label={
+                typeof resolvedRowsPerPageLabel === 'string'
+                  ? resolvedRowsPerPageLabel
+                  : text.common.rowsPerPage
+              }
               onChange={(event) => changeRowsPerPage(Number(event.currentTarget.value))}
             >
               {pageSizeOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
+                <option key={option} value={option}>
+                  {option}
+                </option>
               ))}
             </select>
           </label>
-          <span className="pagination-info">
-            {pageLabel(safePage)}
-          </span>
+          <span className="pagination-info">{pageLabel(safePage)}</span>
         </div>
       ) : (
-        <span className="pagination-info">
-          {pageLabel(safePage)}
+        <span className="pagination-info" aria-label={compact ? pageLabel(safePage) : undefined}>
+          {compact ? `${safePage} / ${safeTotal}` : pageLabel(safePage)}
         </span>
       )}
       {safeTotal > 1 ? (
         <div className="pagination-controls">
-          <button className="pagination-btn" type="button" disabled={safePage <= 1} onClick={() => goToPage(1)} title={pageLabel(1)} aria-label={pageLabel(1)}>
-            <ChevronsLeft size={15} aria-hidden="true" />
-            <span className="sr-only">{pageLabel(1)}</span>
-          </button>
-          <button className="pagination-btn" type="button" disabled={safePage <= 1} onClick={() => goToPage(safePage - 1)} title={text.dashboard.prev} aria-label={text.dashboard.prev}>
+          {!compact && (
+            <button
+              className="pagination-btn"
+              type="button"
+              disabled={safePage <= 1}
+              onClick={() => goToPage(1)}
+              title={pageLabel(1)}
+              aria-label={pageLabel(1)}
+            >
+              <ChevronsLeft size={15} aria-hidden="true" />
+              <span className="sr-only">{pageLabel(1)}</span>
+            </button>
+          )}
+          <button
+            className="pagination-btn"
+            type="button"
+            disabled={safePage <= 1}
+            onClick={() => goToPage(safePage - 1)}
+            title={text.dashboard.prev}
+            aria-label={text.dashboard.prev}
+          >
             <ChevronLeft size={15} aria-hidden="true" />
             <span className="sr-only">{text.dashboard.prev}</span>
           </button>
-          <div className="pagination-pages pagination-pages-full">
-            {renderPageItems(pageItems, 'full')}
-          </div>
-          <div className="pagination-pages pagination-pages-compact">
-            {renderPageItems(compactPageItems, 'compact')}
-          </div>
-          <button className="pagination-btn" type="button" disabled={safePage >= safeTotal} onClick={() => goToPage(safePage + 1)} title={text.dashboard.next} aria-label={text.dashboard.next}>
+          {!compact && (
+            <>
+              <div className="pagination-pages pagination-pages-full">
+                {renderPageItems(pageItems, 'full')}
+              </div>
+              <div className="pagination-pages pagination-pages-compact">
+                {renderPageItems(compactPageItems, 'compact')}
+              </div>
+            </>
+          )}
+          <button
+            className="pagination-btn"
+            type="button"
+            disabled={safePage >= safeTotal}
+            onClick={() => goToPage(safePage + 1)}
+            title={text.dashboard.next}
+            aria-label={text.dashboard.next}
+          >
             <ChevronRight size={15} aria-hidden="true" />
             <span className="sr-only">{text.dashboard.next}</span>
           </button>
-          <button className="pagination-btn" type="button" disabled={safePage >= safeTotal} onClick={() => goToPage(safeTotal)} title={pageLabel(safeTotal)} aria-label={pageLabel(safeTotal)}>
-            <ChevronsRight size={15} aria-hidden="true" />
-            <span className="sr-only">{pageLabel(safeTotal)}</span>
-          </button>
+          {!compact && (
+            <button
+              className="pagination-btn"
+              type="button"
+              disabled={safePage >= safeTotal}
+              onClick={() => goToPage(safeTotal)}
+              title={pageLabel(safeTotal)}
+              aria-label={pageLabel(safeTotal)}
+            >
+              <ChevronsRight size={15} aria-hidden="true" />
+              <span className="sr-only">{pageLabel(safeTotal)}</span>
+            </button>
+          )}
         </div>
       ) : null}
     </nav>
@@ -138,9 +193,7 @@ function paginationItems(page: number, totalPages: number): PageItem[] {
     items.add(totalPages - 3);
   }
 
-  const sorted = [...items]
-    .filter((item) => item >= 1 && item <= totalPages)
-    .sort((a, b) => a - b);
+  const sorted = [...items].filter((item) => item >= 1 && item <= totalPages).sort((a, b) => a - b);
 
   return sorted.reduce<PageItem[]>((result, item, index) => {
     const previous = sorted[index - 1];
@@ -168,7 +221,10 @@ function compactPaginationItems(page: number, totalPages: number): PageItem[] {
   return [1, 'start-gap', page, 'end-gap', totalPages];
 }
 
-function normalizedRowsPerPageOptions(options: number[] | undefined, rowsPerPage: number | undefined) {
+function normalizedRowsPerPageOptions(
+  options: number[] | undefined,
+  rowsPerPage: number | undefined
+) {
   const values = options?.length ? options : [10, 20, 50];
   return uniquePositiveIntegers([...values, rowsPerPage]);
 }

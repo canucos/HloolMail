@@ -1,6 +1,6 @@
-import { forwardRef, memo } from 'react';
+import { memo } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronDown, MailOpen } from 'lucide-react';
+import { Inbox } from 'lucide-react';
 import type { MessageSummary } from '../../api';
 import { EmptyState, PaginationControls, SenderBrandAvatar } from '../../components/shared';
 import { extractCode, relativeTime } from '../../lib/display';
@@ -26,7 +26,7 @@ type MessageListProps = {
   onPageChange: (page: number) => void;
 };
 
-export const MessageList = forwardRef<HTMLDivElement, MessageListProps>(function MessageList({
+export function MessageList({
   text,
   email,
   items,
@@ -41,19 +41,16 @@ export const MessageList = forwardRef<HTMLDivElement, MessageListProps>(function
   onRetry,
   shouldReduceMotion,
   onSelectMessage,
-  onPageChange
-}, ref) {
-  const showInitialSkeleton = Boolean(email && !error && (isLoading || isFetching) && items.length === 0);
+  onPageChange,
+}: MessageListProps) {
+  const showInitialSkeleton = Boolean(
+    email && !error && (isLoading || isFetching) && items.length === 0
+  );
 
   return (
     <div className="inbox-list-section inbox-message-list-section">
-      <div className="inbox-section-heading">
-        <p>{text.inbox.messages}</p>
-        <span>{formatCount(text.inbox.messageCount, total)}</span>
-      </div>
       <motion.div
-        ref={ref}
-        className="mail-list inbox-scroll-list"
+        className={`mail-list inbox-scroll-list ${items.length === 0 ? 'mail-list-empty' : ''}`}
         variants={mailListVariants(shouldReduceMotion, items.length)}
         initial="hidden"
         animate="show"
@@ -71,21 +68,36 @@ export const MessageList = forwardRef<HTMLDivElement, MessageListProps>(function
             onSelect={() => onSelectMessage(selectedID === message.id ? '' : message.id)}
           />
         ))}
-        {email && Boolean(error) && <InboxListError label={readErrorMessage(error)} actionLabel={text.common.refresh} onRetry={onRetry} />}
+        {email && Boolean(error) && (
+          <InboxListError
+            label={readErrorMessage(error)}
+            actionLabel={text.common.refresh}
+            onRetry={onRetry}
+          />
+        )}
         {showInitialSkeleton && <MessageListSkeleton label={text.common.loading} />}
-        {email && !error && !isLoading && !isFetching && items.length === 0 && <EmptyState label={text.inbox.empty} />}
+        {email && !error && !isLoading && !isFetching && items.length === 0 && (
+          <div className="inbox-empty-state" role="status">
+            <Inbox size={36} strokeWidth={1.4} aria-hidden="true" />
+            <p>{text.inbox.empty}</p>
+          </div>
+        )}
         {!email && <EmptyState label={text.inbox.start} />}
       </motion.div>
       {email && (
-        <PaginationControls
-          page={page}
-          totalPages={totalPages}
-          onPageChange={onPageChange}
-        />
+        <div className="inbox-list-footer">
+          <span>{formatCount(text.inbox.messageCount, total)}</span>
+          <PaginationControls
+            page={page}
+            totalPages={totalPages}
+            onPageChange={onPageChange}
+            compact
+          />
+        </div>
       )}
     </div>
   );
-});
+}
 
 const MESSAGE_LIST_SKELETON_ROWS = [
   { title: '68%', sender: '46%', time: '3.7rem' },
@@ -93,13 +105,15 @@ const MESSAGE_LIST_SKELETON_ROWS = [
   { title: '52%', sender: '40%', time: '4.2rem' },
   { title: '72%', sender: '50%', time: '3.4rem' },
   { title: '60%', sender: '44%', time: '3.9rem' },
-  { title: '82%', sender: '56%', time: '3.2rem' }
+  { title: '82%', sender: '56%', time: '3.2rem' },
 ] as const;
 
 function MessageListSkeleton({ label }: { label: string }) {
   return (
     <div className="mail-list-skeleton">
-      <span className="sr-only" role="status" aria-live="polite">{label}</span>
+      <span className="sr-only" role="status" aria-live="polite">
+        {label}
+      </span>
       <div className="mail-list-skeleton-rows" aria-hidden="true">
         {MESSAGE_LIST_SKELETON_ROWS.map((row, index) => (
           <div className="mail-row-card mail-row-skeleton-card" key={`mail-row-skeleton-${index}`}>
@@ -107,12 +121,21 @@ function MessageListSkeleton({ label }: { label: string }) {
               <div className="mail-row-summary">
                 <span className="mail-skeleton-line mail-skeleton-avatar" />
                 <span className="mail-skeleton-stack">
-                  <span className="mail-skeleton-line mail-skeleton-title" style={{ width: row.title }} />
-                  <span className="mail-skeleton-line mail-skeleton-subtitle" style={{ width: row.sender }} />
+                  <span
+                    className="mail-skeleton-line mail-skeleton-title"
+                    style={{ width: row.title }}
+                  />
+                  <span
+                    className="mail-skeleton-line mail-skeleton-subtitle"
+                    style={{ width: row.sender }}
+                  />
                 </span>
               </div>
               <div className="mail-row-side mail-row-skeleton-side">
-                <span className="mail-skeleton-line mail-skeleton-time" style={{ width: row.time }} />
+                <span
+                  className="mail-skeleton-line mail-skeleton-time"
+                  style={{ width: row.time }}
+                />
                 <span className="mail-skeleton-line mail-skeleton-icon" />
               </div>
             </div>
@@ -138,7 +161,7 @@ export const MessageRow = memo(function MessageRow({
   expanded,
   pulsing,
   shouldReduceMotion,
-  onSelect
+  onSelect,
 }: MessageRowProps) {
   const code = extractCode(message);
 
@@ -146,7 +169,9 @@ export const MessageRow = memo(function MessageRow({
     <motion.div
       variants={mailRowVariants(shouldReduceMotion)}
       className="mail-row-card"
-      style={pulsing ? { animation: 'mail-pulse 2.5s ease-out both' } : undefined}
+      style={
+        pulsing && !shouldReduceMotion ? { animation: 'mail-pulse 2.5s ease-out both' } : undefined
+      }
       role="listitem"
     >
       <div className={`mail-row ${expanded ? 'mail-row-active' : ''}`}>
@@ -157,40 +182,39 @@ export const MessageRow = memo(function MessageRow({
           aria-current={expanded ? 'true' : undefined}
         >
           <div className="mail-row-summary">
-            <SenderBrandAvatar fromAddress={message.from_address} fromName={message.from_name} size="sm" className="mail-row-avatar" />
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                {expanded ? <MailOpen size={15} className="shrink-0 text-[var(--focus)]" /> : null}
-                <span className="truncate text-sm font-medium">{message.subject || text.common.noSubject}</span>
+            <SenderBrandAvatar
+              fromAddress={message.from_address}
+              fromName={message.from_name}
+              size="sm"
+              className="mail-row-avatar"
+            />
+            <div className="mail-row-copy">
+              <div className="mail-row-heading">
+                <span className="mail-row-sender">
+                  {message.from_name || message.from_address || 'unknown'}
+                </span>
+                <time dateTime={message.created_at}>{relativeTime(message.created_at)}</time>
               </div>
-              <div className="truncate text-xs text-[var(--muted)]">
-                {message.from_name || message.from_address || 'unknown'}
-              </div>
+              <div className="mail-row-subject">{message.subject || text.common.noSubject}</div>
+              {message.preview && <p className="mail-row-preview">{message.preview}</p>}
             </div>
-          </div>
-          <div className="mail-row-side">
-            <time className="text-xs text-[var(--muted)]">{relativeTime(message.created_at)}</time>
-            <ChevronDown size={15} className={expanded ? 'rotate-180' : ''} />
           </div>
         </button>
         {code && <VerificationCodeCopyButton code={code} compact className="mail-code-pill" />}
       </div>
-      {expanded && (
-        <motion.div
-          className="mail-row-details"
-          initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
-          animate={shouldReduceMotion ? { opacity: 1 } : { opacity: 1, height: 'auto' }}
-          transition={{ duration: shouldReduceMotion ? 0.08 : 0.18, ease: 'easeOut' }}
-        >
-          <div className="truncate">{message.recipient}</div>
-          {message.preview && <p>{message.preview}</p>}
-        </motion.div>
-      )}
     </motion.div>
   );
 });
 
-function InboxListError({ label, actionLabel, onRetry }: { label: string; actionLabel: string; onRetry: () => void }) {
+function InboxListError({
+  label,
+  actionLabel,
+  onRetry,
+}: {
+  label: string;
+  actionLabel: string;
+  onRetry: () => void;
+}) {
   return (
     <div className="inbox-list-error" role="alert">
       <span>{label}</span>

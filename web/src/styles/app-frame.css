@@ -7,6 +7,7 @@
   --z-onboarding-scrim: 9000;
   --z-onboarding-target: 9010;
   --z-onboarding-panel: 9020;
+  --z-modal: 9030;
 }
 
 .app-frame {

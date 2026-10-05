@@ -1,5 +1,12 @@
 import { useEffect, useRef } from 'react';
-import type { CSSProperties, FormEventHandler, MouseEvent, ReactNode, RefCallback, RefObject } from 'react';
+import type {
+  CSSProperties,
+  FormEventHandler,
+  MouseEvent,
+  ReactNode,
+  RefCallback,
+  RefObject,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 type DialogShellProps = {
@@ -28,7 +35,7 @@ const focusableSelector = [
   'input:not([disabled])',
   'select:not([disabled])',
   '[contenteditable="true"]',
-  '[tabindex]:not([tabindex="-1"])'
+  '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
 export function DialogShell({
@@ -47,7 +54,7 @@ export function DialogShell({
   closeOnBackdrop = true,
   closeOnEscape = true,
   initialFocusRef,
-  restoreFocus = true
+  restoreFocus = true,
 }: DialogShellProps) {
   const panelRef = useRef<HTMLElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -55,7 +62,8 @@ export function DialogShell({
   useEffect(() => {
     if (!open) return;
 
-    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusTimer = window.setTimeout(() => {
       const initialFocus = initialFocusRef?.current;
       if (initialFocus && isFocusable(initialFocus)) {
@@ -104,7 +112,8 @@ export function DialogShell({
       const last = focusableElements[focusableElements.length - 1];
       const activeElement = document.activeElement;
 
-      if (activeElement instanceof Node && !panelRef.current?.contains(activeElement)) {
+      // 容器本身或已禁用的控件不在 Tab 序列中，从对应边界重新进入。
+      if (!(activeElement instanceof HTMLElement) || !focusableElements.includes(activeElement)) {
         event.preventDefault();
         (event.shiftKey ? last : first).focus();
         return;
@@ -131,7 +140,7 @@ export function DialogShell({
   const panelStyle: CSSProperties = {
     maxHeight: 'min(92dvh, 52rem)',
     overflowY: 'auto',
-    ...style
+    ...style,
   };
   const handleBackdropMouseDown = (event: MouseEvent<HTMLDivElement>) => {
     if (closeOnBackdrop && event.target === event.currentTarget) {
@@ -154,17 +163,22 @@ export function DialogShell({
     'aria-describedby': descriptionId,
     'aria-label': ariaLabel,
     style: panelStyle,
-    tabIndex: -1
+    tabIndex: -1,
   };
-  const panel = as === 'form' ? (
-    <form {...panelProps} ref={setPanelRef as RefCallback<HTMLFormElement>} onSubmit={handleFormSubmit}>
-      {children}
-    </form>
-  ) : (
-    <section {...panelProps} ref={setPanelRef as RefCallback<HTMLElement>}>
-      {children}
-    </section>
-  );
+  const panel =
+    as === 'form' ? (
+      <form
+        {...panelProps}
+        ref={setPanelRef as RefCallback<HTMLFormElement>}
+        onSubmit={handleFormSubmit}
+      >
+        {children}
+      </form>
+    ) : (
+      <section {...panelProps} ref={setPanelRef as RefCallback<HTMLElement>}>
+        {children}
+      </section>
+    );
 
   return createPortal(
     <div className={backdropClassName} role="presentation" onMouseDown={handleBackdropMouseDown}>
@@ -181,8 +195,11 @@ function getFocusableElements(container: HTMLElement | null) {
 
 function isFocusable(element: HTMLElement) {
   if (element.tabIndex < 0) return false;
-  if (element.hasAttribute('disabled') || element.getAttribute('aria-hidden') === 'true') return false;
+  // :disabled 包含 fieldset 的继承禁用，同时保留首个 legend 的原生例外。
+  if (element.matches(':disabled') || element.getAttribute('aria-hidden') === 'true') return false;
 
   const style = window.getComputedStyle(element);
-  return style.visibility !== 'hidden' && style.display !== 'none' && element.getClientRects().length > 0;
+  return (
+    style.visibility !== 'hidden' && style.display !== 'none' && element.getClientRects().length > 0
+  );
 }

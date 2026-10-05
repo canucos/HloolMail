@@ -4,8 +4,8 @@ import { ApiError } from '../../api';
 import type { Language } from '../../store';
 import { domainModeLabel } from '../../lib/display';
 
-export const MAILBOX_PAGE_SIZE = 8;
-export const EMAIL_PAGE_SIZE = 8;
+export const MAILBOX_PAGE_SIZE = 20;
+export const EMAIL_PAGE_SIZE = 20;
 export const MAX_GENERATE_EMAIL_CONFLICT_RETRIES = 3;
 
 export const mailListVariants = (reduce: boolean, itemCount: number): Variants => ({
